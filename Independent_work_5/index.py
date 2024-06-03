@@ -1,126 +1,157 @@
 """Module"""
 
-import dataclasses
-import math
-from datetime import datetime as Date
-from abc import abstractmethod
+# pylint: disable=E1101
+
+from sklearn.datasets import make_moons
+from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
+import numpy as np
+from torch import nn
+import torch
 
 
-def calculate_deposit(contribution, rate, year):
-    """
-    contribution: Вклад
-    rate: % ставка
-    term: Кінцевий рік
-    """
+NUM_SAMPLES = 1000
+NOISE = 0.1
+RANDOM_STATE = 1
 
-    now = Date.now()
-    future_date = now.replace(year)
-    terms = max(future_date.year - now.year, 0)
+X, y = make_moons(n_samples=NUM_SAMPLES, noise=NOISE, random_state=RANDOM_STATE)
+fig, ax = plt.subplots(1)
 
-    return contribution * (1 + rate / 100) ** terms
+ax.scatter(x=X[:, 0], y=X[:, 1], c=y, s=2, cmap=plt.cm.RdYlBu)
+ax.set_aspect("equal", "box")
+plt.show()
 
+X = torch.from_numpy(X).type(torch.float32)
+y = torch.from_numpy(y).type(torch.float32)
 
-CONTRIBUTION = 100
-RATE = 5
-YEAR = 2027
-
-RES = calculate_deposit(CONTRIBUTION, RATE, YEAR)
-print(
-    f"Сума на депозиті в [\033[35m {YEAR} \033[0m] році при ставці в [\033[92m {RATE}% \033[0m] складатиме [\033[92m {RES:.2f} \033[0m] одиниць"
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=60
 )
 
-RATE = 7
-RES = calculate_deposit(CONTRIBUTION, RATE, YEAR)
-print(
-    f"Сума на депозиті в [\033[35m {YEAR} \033[0m] році при ставці в [\033[92m {RATE}% \033[0m] складатиме [\033[92m {RES:.2f} \033[0m] одиниць"
-)
+print(len(X_train), len(X_test), len(y_train), len(y_test))
 
 
-@dataclasses.dataclass
-class Circle:
-    """
-    :radius: Радіус кола
-    :name: Назва об’єкту (не обов’язковоий)
-    """
+def set_seed(seed):
+    """set_seed"""
 
-    def __init__(self, radius, name="Circle") -> None:
-        self.__radius = radius
-        self.name = name
-
-    def get_area(self) -> float:
-        """Area calculation"""
-
-        return math.pi * self.__radius**2
-
-    def get_perimeter(self) -> float:
-        """Perimeter calculation"""
-
-        return 2 * math.pi * self.__radius
-
-    def info(self):
-        """Printing Info"""
-
-        print(self)
-
-    @abstractmethod
-    def calculate_expenses(self, expenses):
-        """Calculate expenses"""
-
-    def __str__(self):
-        return f"Периметр кола \033[35m{self.name}\033[0m з радіусом [\033[92m {self.__radius:.2f}m \033[0m] становить [\033[92m {self.get_perimeter():.2f}m \033[0m] та площа [\033[92m {self.get_area():.2f}m² \033[0m]"
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
 
 
-circle1 = Circle(math.pi, "Circle 1")
-circle2 = Circle(math.pi**math.pi, "Circle 2")
-
-circle1.info()
-circle2.info()
+set_seed(42)
 
 
-class Lacquered(Circle):
-    """Lacquered shape"""
+class MoonModel(nn.Module):
+    """MoonModel"""
 
-    expenses = 0
+    def __init__(self, n1, n2):
+        super().__init__()
 
-    def __init__(self, radius, name) -> None:
-        super().__init__(radius, name)
+        self.l1 = nn.Linear(in_features=2, out_features=n1)
+        self.l2 = nn.Linear(in_features=n1, out_features=n2)
+        self.l3 = nn.Linear(in_features=n2, out_features=1)
 
-    def calculate_expenses(self, expenses=150):  # 150г/1m²
-        """calculate_expenses"""
+        self.tanh = nn.Tanh()
 
-        self.expenses = super().get_area() * expenses
+    def forward(self, x):
+        """forward"""
 
-        print(self)
-
-    def __str__(self):
-        return f"Витрата лаку на фігуру \033[35m{self.name}\033[0m площею в [\033[92m {super().get_area():.2f}m² \033[0m] становить [\033[92m {self.expenses:.2f}\u0433 \033[0m] лаку."
-
-
-class Aerosol(Circle):
-    """Aerosol shape"""
-
-    expenses = 0
-
-    def __init__(self, radius, name) -> None:
-        super().__init__(radius, name)
-
-    def calculate_expenses(self, expenses=2.5):  # 1б/2.5m²
-        """calculate_expenses"""
-
-        self.expenses = super().get_area() * expenses
-
-        print(self)
-
-    def __str__(self):
-        return f"Витрата аерозолі на фігуру \033[35m{self.name}\033[0m площею в [\033[92m {super().get_area():.2f}m² \033[0m] становить [\033[92m {self.expenses:.2f} \033[0m] банки."
+        return self.l3(self.tanh(self.l2(self.tanh(self.l1(x)))))
 
 
-figure_list = [
-    Lacquered(math.pi, "Lacquered Circle 1"),
-    Lacquered(math.pi**math.pi, "Lacquered Circle 1"),
-    Aerosol(math.pi, "Aerosol Circle 1"),
-    Aerosol(math.pi**math.pi, "Aerosol Circle 1"),
-]
+def accuracy_fn(y_true, y_pred):
+    """accuracy_fn"""
 
-for i in figure_list:
-    i.calculate_expenses()
+    correct = torch.eq(y_true, y_pred).sum().item()
+    acc = (correct / len(y_pred)) * 100
+    return acc
+
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+MODEL = MoonModel(10, 6).to(DEVICE)
+
+loss_fn = nn.BCEWithLogitsLoss()
+optimizer = torch.optim.Adam(params=MODEL.parameters(), lr=0.1)
+
+EPOCHS = 200
+
+X_train, y_train = X_train.to(DEVICE), y_train.to(DEVICE)
+X_test, y_test = X_test.to(DEVICE), y_test.to(DEVICE)
+
+
+def plot_decision_boundary(model: torch.nn.Module, x: torch.Tensor, y: torch.Tensor):
+    """plot_decision_boundary"""
+    model.to("cpu")
+    X, y = X.to("cpu"), y.to("cpu")
+
+    x_min, x_max = X[:, 0].min() - 0.1, X[:, 0].max() + 0.1
+    y_min, y_max = X[:, 1].min() - 0.1, X[:, 1].max() + 0.1
+    xx, yy = np.meshgrid(np.linspace(x_min, x_max, 101), np.linspace(y_min, y_max, 101))
+
+    X_to_pred_on = torch.from_numpy(np.column_stack((xx.ravel(), yy.ravel()))).float()
+
+    model.eval()
+    with torch.inference_mode():
+        y_logits = model(X_to_pred_on)
+
+    if len(torch.unique(y)) > 2:
+        y_pred = torch.softmax(y_logits, dim=1).argmax(dim=1)
+    else:
+        y_pred = torch.round(torch.sigmoid(y_logits))
+
+    y_pred = y_pred.reshape(xx.shape).detach().numpy()
+    plt.contourf(xx, yy, y_pred, cmap=plt.cm.RdYlBu, alpha=0.7)
+    plt.scatter(X[:, 0], X[:, 1], c=y, s=40, cmap=plt.cm.RdYlBu)
+    plt.xlim(xx.min(), xx.max())
+    plt.ylim(yy.min(), yy.max())
+
+
+def plot_predictions(
+    train_data, train_labels, test_data, test_labels, predictions=None
+):
+    """plot_predictions"""
+
+    plt.figure(figsize=(10, 7))
+    plt.scatter(train_data, train_labels, c="b", s=4, label="Training data")
+    plt.scatter(test_data, test_labels, c="g", s=4, label="Testing data")
+
+    if predictions is not None:
+        plt.scatter(test_data, predictions, c="r", s=4, label="Predictions")
+
+    plt.legend(prop={"size": 14})
+
+
+for epoch in range(EPOCHS):
+    MODEL.train()
+
+    y_logits = MODEL(X_train).squeeze()
+    y_pred = torch.round(torch.sigmoid(y_logits))
+    loss = loss_fn(y_logits, y_train)
+    acc = accuracy_fn(y_true=y_train, y_pred=y_pred)
+
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    MODEL.eval()
+    with torch.inference_mode():
+        test_logits = MODEL(X_test).squeeze()
+        test_pred = torch.round(torch.sigmoid(test_logits))
+        test_loss = loss_fn(test_logits, y_test)
+        test_acc = accuracy_fn(y_true=y_test, y_pred=test_pred)
+
+    if epoch % 100 == 0:
+        print(
+            f"Epoch: {epoch} | Loss: {loss:.5f}, Accuracy: {acc:.2f}% | Test loss: {test_loss:.5f}, Test acc: {test_acc:.2f}%"
+        )
+
+plt.figure(figsize=(12, 6))
+plt.subplot(1, 2, 1)
+plt.title("Train")
+plot_decision_boundary(MODEL, X_train, y_train)
+plt.subplot(1, 2, 2)
+plt.title("Test")
+plot_decision_boundary(MODEL, X_test, y_test)
